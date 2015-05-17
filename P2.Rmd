@@ -1,0 +1,106 @@
+---
+title: "Effects of storm events on communities"
+keep_md: yes
+date: "Saturday, May 16, 2015"
+output: html_document
+---
+
+```{r global_opts, include=FALSE}
+knitr::opts_chunk$set(fig.path='/Figs', cache=TRUE, echo=TRUE, warning=FALSE)
+```
+
+##Synopsis
+Storms and other severe weather events can cause both public health and economic problems for communities and municipalities. This report explores the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database to find the events that are most damaging to population and health and economic health.
+
+Tornados are most damaging to population health by far. They cause most fatalities and injuries. While Excessive heat and flash floods are next major causes for fatalities, Winds and Floods are causes for next major injuries. As far as economic damage to communities are concerned, Floods are the biggest threats followed by Hurricanes. Tornados also cause significant damage to property.
+
+
+##Data Processing
+Storm and other severe weather events data between 1951 and 2011 are downloaded from [NOAA database] on `r date()`. File is unzipped and loaded into r for intial processing. Description of each column is available [here][1].
+
+```{r loading_data}
+url <- 'https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2'
+if (!file.exists('StormData.csv.bz2')) {
+  download.file(url, destfile = 'stormdata.csv.bz2')
+}
+raw_data <- read.csv(bzfile('stormdata.csv.bz2'), na.strings=c('',' ','NA'))
+```
+
+Document requires preparer to categorize data into 48 predefined events, but the data doesn't comply with this requirement.
+
+```{r explore}
+evtypes <- length(unique(raw_data$EVTYPE))
+```
+
+There are `r evtypes` types of event types as opposed to 48 required by the document. One way to clean up this data is to recategorize them maticulously into allowed types. This can be made reproducible by uploading a mapping table on git. However, for the purpose of rest of the analysis original event types in data are untouched.
+
+Since property and crop damage multipliers are coded in **PROPDMGEXP** and **CROPDMGEXP** data must be pre-processed to give a numeric value for these damages
+
+```{r process_damage_value}
+require(dplyr)
+dmg <- c(1,0,0,0,
+        1,10,100,10^3,10^4,10^5,10^6,10^7,10^8,
+        100,100,10^3,10^3,10^6,10^6,10^9,10^9)
+names(dmg) <- c("","-","?","+",
+                       "0","1","2","3","4","5","6","7","8",
+                       "h","H","k","K","m","M","b","B")
+proc_data <- select(raw_data, EVTYPE, FATALITIES, INJURIES,
+                    PROPDMG, PROPDMGEXP, CROPDMG, CROPDMGEXP)
+
+proc_data$PROPDMGEXP[is.na(proc_data$PROPDMGEXP)] <- 0
+proc_data$CROPDMGEXP[is.na(proc_data$CROPDMGEXP)] <- 0
+
+proc_data$Property.Damage <- proc_data$PROPDMG * dmg[as.character(proc_data$PROPDMGEXP)]
+proc_data$Crop.Damage <- proc_data$CROPDMG * dmg[as.character(proc_data$CROPDMGEXP)]
+```
+
+##Results
+
+###Events most harmful to population health
+
+Events that caused most fatalities and most injuries are considered a threat to population health. To find such events, processed data is grouped by events and then summed over fatalites and injuries.
+
+```{r Q1, cache=FALSE}
+require(ggplot2)
+require(gridExtra)
+pop_health <- with(proc_data, 
+                   aggregate(
+                      cbind(FATALITIES,INJURIES,Property.Damage, Crop.Damage), 
+                      by = list(EVTYPE=EVTYPE), sum))
+
+plot <- ggplot(
+            pop_health[order(pop_health$FATALITIES, decreasing = T),][1:5,],
+            aes(x=reorder(EVTYPE, FATALITIES), y=FATALITIES))
+p1 <- plot + geom_bar(stat = 'identity', fill = 'gray60') + 
+          labs(x='Event Type', y='Fatalities') + ggtitle('Events causing most fatalities')
+plot <- ggplot(
+            pop_health[order(pop_health$INJURIES, decreasing = T),][1:5,],
+            aes(x=reorder(EVTYPE, INJURIES), y=INJURIES))
+p2 <- plot + geom_bar(stat = 'identity', fill = 'gray60') +
+          labs(x='Event Type', y='Injuries') + ggtitle('Events causing most injuries')
+grid.arrange(p1,p2, main = 'Weather events that caused most damage to population health')
+```
+
+Plots above highlight the events that cause most fatalities and most injuries. Tornados cause most fatalities and injuries making them deadliest event by far.
+
+###Events most harmful to economy
+
+Events that caused most property and crop damage are considered a threat to economic health. To find such events, processed data is grouped by events and then summed over property damage and crop damage. A new column Economy.Damage is added to find the total damage from property and crops.
+
+```{r Q2, cache=FALSE}
+require(ggplot2)
+require(gridExtra)
+pop_health$Economic.Damage <- (pop_health$Property.Damage + pop_health$Crop.Damage)/(10^6)
+data <- pop_health[order(pop_health$Economic.Damage, decreasing = T),][1:10,]
+plot <- ggplot(data,
+              aes(x = reorder(EVTYPE,Economic.Damage), y=Economic.Damage))
+plot + geom_bar(stat = 'identity', fill = 'gray60') +
+      theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+      labs(x='Event Type', y='Economic Damage in millions of dollars') +
+      ggtitle('Economic damage by weather events')
+```
+
+As seen from the plot, Floods cost most economic damage followed by Hurricanes.
+
+[NOAA database]: "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+[1]: "https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf"
